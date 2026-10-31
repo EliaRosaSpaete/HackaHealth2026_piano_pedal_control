@@ -1,52 +1,74 @@
 #include <Arduino.h>
 #include <Servo.h>
+#include "Trigger.h"
+
+// ---- Wiring ----
+// Motor (BLS3235, 3 wires):
+//   GND    (black/brown) -> GND (must be shared with the Arduino GND)
+//   Power  (red)         -> external supply as per motor datasheet (do NOT power
+//                           from the Arduino pin if the motor draws a lot of current)
+//   Data   (yellow/white)-> PIN_MOTOR (5)
+//
+// Endstop switch (B59, 3 terminals: COM, NC, NO) - used with SwitchTrigger:
+//   COM (common) -> GND
+//   NO (normally open)   -> PIN_SWITCH (2)   pressed = pin pulled LOW
+//   NC (normally closed) -> not connected
+//   (Using NC instead would invert the logic: pin LOW while NOT pressed.)
+//
+// Force sensor (FSR402, 2 connectors, polarity does not matter) - used with FsrTrigger:
+//   Pin 1 -> 5V (3.3V on 3.3V boards)
+//   Pin 2 -> PIN_FSR (A0) AND through a ~10k resistor to GND (voltage divider)
+
+// ---- Configuration ----
+const uint8_t PIN_MOTOR = 5;
+const uint8_t PIN_SWITCH = 2;   // endstop switch (B59), see wiring above
+const uint8_t PIN_FSR = A0;     // FSR402 divider output, see wiring above
+
+const int NEUTRAL_ANGLE = 0;   // motor position when not triggered
+const int PRESSED_ANGLE = 180;  // predefined angle X when triggered
+
+// ---- Trigger selection: swap this line to change the sensor ----
+// SwitchTrigger switchTrigger(PIN_SWITCH);
+const int FSR_PRESSED_BELOW = 20;    // filtered reading below this = pressed (0-1023)
+const int FSR_RELEASED_ABOVE = 50;   // filtered reading above this = released (keep higher than PRESSED_BELOW)
+const float FSR_CUTOFF_HZ = 20.0;    // low-pass filter cutoff frequency
+const unsigned long FSR_WINDOW_MS = 200;  // filter uses the samples of the last 200 ms
+FsrTrigger fsrTrigger(PIN_FSR, FSR_PRESSED_BELOW, FSR_RELEASED_ABOVE, FSR_CUTOFF_HZ, FSR_WINDOW_MS);
+// Trigger &trigger = switchTrigger;
+Trigger &trigger = fsrTrigger;
 
 Servo motor;
-int angle = 90;
-int pin_motor = 5;
-
-// put function declarations here:
-int myFunction(int, int);
 
 void setup() {
-  // put your setup code here, to run once:
-  // motor.attach(pin_motor, 1000, 2000);
-  // motor.writeMicroseconds(1000);   // arm: minimum throttle
   Serial.begin(115200);
-  motor.attach(pin_motor);
-  motor.write(angle);
-  delay(3000);
-  Serial.println("Ready. Type an angle (0-180) and press Enter.");
-  
+  trigger.begin();
+  motor.attach(PIN_MOTOR);
+  motor.write(NEUTRAL_ANGLE);
+  delay(3000);  // let the motor settle
+  Serial.println("Ready.");
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-  // motor.writeMicroseconds(1100);   // low throttle
-  // delay(5000);
-  // motor.writeMicroseconds(1000);   // stop
-  // delay(3000);
-  if (Serial.available() > 0) {
-    String input = Serial.readStringUntil('\n');
-    input.trim();
+  static unsigned long lastPrint = 0;
+  
+  bool pressed = trigger.isActive();
+  int targetAngle = pressed ? PRESSED_ANGLE : NEUTRAL_ANGLE;
+  motor.write(targetAngle);
 
-    if (input.length() > 0) {
-      int newAngle = input.toInt();
-
-      if (newAngle >= 0 && newAngle <= 180) {
-        angle = newAngle;
-        Serial.print("New angle: ");
-        Serial.println(angle);
-      } else {
-        Serial.println("Invalid. Enter a number from 0 to 180.");
-      }
-    }
+  // Print status every 800 ms
+  if (millis() - lastPrint >= 800) {
+    lastPrint = millis();
+    Serial.print("FSR raw: ");
+    Serial.print(analogRead(PIN_FSR));
+    Serial.print(" | FSR filtered: ");
+    Serial.print(fsrTrigger.filtered());
+    Serial.print(" | Trigger: ");
+    Serial.print(pressed ? "PRESSED" : "RELEASED");
+    Serial.print(" | Motor target angle: ");
+    Serial.print(targetAngle);
+    Serial.print(" | Motor position: ");
+    Serial.println(motor.read());
   }
 
-  motor.write(angle);
   delay(15);
-}
-// put function definitions here:
-int myFunction(int x, int y) {
-  return x + y;
 }
