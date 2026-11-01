@@ -23,16 +23,16 @@ private:
   uint8_t pin_;
 };
 
-// Force sensitive resistor (FSR402), INVERTED: the pedal counts as pressed when the
-// filtered reading is LOW. The raw reading is low-pass filtered (first-order, cutoff
+// Force sensitive resistor (FSR402) in a voltage divider: the pedal counts as pressed when
+// the filtered reading is HIGH. The raw reading is low-pass filtered (first-order, cutoff
 // cutoffHz) over the samples of the last windowMs milliseconds.
-// Hysteresis: pressed when filtered < pressedBelow, released when filtered > releasedAbove
-// (releasedAbove must be higher than pressedBelow).
+// Hysteresis: pressed when filtered > pressedAbove, released when filtered < releasedBelow
+// (pressedAbove must be higher than releasedBelow).
 class FsrTrigger : public Trigger {
 public:
-  FsrTrigger(uint8_t pin, int pressedBelow, int releasedAbove,
+  FsrTrigger(uint8_t pin, int pressedAbove, int releasedBelow,
              float cutoffHz = 20.0f, unsigned long windowMs = 200)
-      : pin_(pin), pressedBelow_(pressedBelow), releasedAbove_(releasedAbove),
+      : pin_(pin), pressedAbove_(pressedAbove), releasedBelow_(releasedBelow),
         rc_(1.0f / (2.0f * PI * cutoffHz)), windowMs_(windowMs) {}
 
   void begin() override { pinMode(pin_, INPUT); }
@@ -40,12 +40,18 @@ public:
   bool isActive() override {
     addSample(millis(), analogRead(pin_));
     filtered_ = filter();
-    if (!active_ && filtered_ < pressedBelow_) active_ = true;
-    else if (active_ && filtered_ > releasedAbove_) active_ = false;
+    if (!active_ && filtered_ > pressedAbove_) active_ = true;
+    else if (active_ && filtered_ < releasedBelow_) active_ = false;
     return active_;
   }
 
   float filtered() const { return filtered_; }  // last filtered value, for debugging
+
+  // Change the hysteresis thresholds at runtime (e.g. from a potentiometer).
+  void setThresholds(int pressedAbove, int releasedBelow) {
+    pressedAbove_ = pressedAbove;
+    releasedBelow_ = releasedBelow;
+  }
 
 private:
   static const uint8_t MAX_SAMPLES = 32;
@@ -78,7 +84,7 @@ private:
   }
 
   uint8_t pin_;
-  int pressedBelow_, releasedAbove_;
+  int pressedAbove_, releasedBelow_;
   float rc_;
   unsigned long windowMs_;
   unsigned long times_[MAX_SAMPLES];
